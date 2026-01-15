@@ -1,0 +1,15 @@
+Metadata-Version: 2.1
+Name: tesse
+Version: 0.1.2
+Summary: TESSE python interface
+<<<<<<< HEAD
+Home-page: UNKNOWN
+License: UNKNOWN
+Platform: UNKNOWN
+License-File: LICENSE
+
+UNKNOWN
+
+=======
+License-File: LICENSE
+>>>>>>> 96e5e9c (reconnect to local folder)

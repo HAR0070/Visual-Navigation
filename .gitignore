@@ -1,0 +1,11 @@
+build/ 
+install/ 
+log/ 
+venv/ 
+
+**/build/
+**/install/ 
+**/log/ 
+**/bags/
+vnav_builds/
+cpp_tut/
