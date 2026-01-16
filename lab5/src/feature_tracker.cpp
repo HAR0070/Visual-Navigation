@@ -144,7 +144,7 @@ void FeatureTracker::trackFeatures(
   //     **** TODO: FILL IN HERE ***
     drawMatches( img_1, img_2, 
       keypoints_1  , keypoints_2,
-      matches, true );
+      matches, show_images );
 
   //
   // ~~~~ end solution

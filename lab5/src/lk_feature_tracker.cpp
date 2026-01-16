@@ -83,20 +83,31 @@ void LKFeatureTracker::trackFeatures(const cv::Mat& frame) {
 
   if (frame.empty()){
     LOG(ERROR) << "Input image to LKFeatureTracker::trackFeatures  is empty";
-    break;
+    return;
   }
 
   cvtColor(frame , gray_frame, COLOR_BGR2GRAY );
 
-  p0 = &LKFeatureTracker::prev_corners_ ;
-  prev_gray_frame = &LKFeatureTracker::prev_frame_ ;
+  p0 = LKFeatureTracker::prev_corners_ ;
+  prev_gray_frame = LKFeatureTracker::prev_frame_ ;
+
+  // creating random colours to plot
+  std::vector<Scalar> colors;
+    RNG rng;
+    for(int i = 0; i < 100; i++)
+    {
+        int r = rng.uniform(0, 256);
+        int g = rng.uniform(0, 256);
+        int b = rng.uniform(0, 256);
+        colors.push_back(Scalar(r,g,b));
+    }
 
   std::vector<uchar> status;    // to  record the status of points
   std::vector<float> err;       // 
   TermCriteria criteria = TermCriteria((TermCriteria::COUNT) + (TermCriteria::EPS), 10, 0.03);
   calcOpticalFlowPyrLK(prev_gray_frame, gray_frame, p0, p1, status, err, Size(15,15), 2, criteria);
 
-  vector<Point2f> good_new;
+  std::vector<Point2f> good_new;
       for(uint i = 0; i < p0.size(); i++)
       {
           // Select good points
