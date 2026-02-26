@@ -26,10 +26,8 @@ find_package(NLopt REQUIRED)
 find_package(glog REQUIRED)
 find_package(yaml-cpp REQUIRED)
 find_library(NLOPT_LIB nlopt REQUIRED)
-<<<<<<< HEAD
-=======
+
 # find_library(NLOPT_CXX_LIB nlopt_cxx REQUIRED)
->>>>>>> 96e5e9c (reconnect to local folder)
 
 #find_package(catkin REQUIRED COMPONENTS
 #  catkin_simple

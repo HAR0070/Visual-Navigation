@@ -7,6 +7,7 @@
 #include <sstream>
 #include <std_msgs/msg/string.hpp>
 #include <tf2_ros/transform_broadcaster.h>
+
 #include <trajectory_msgs/msg/multi_dof_joint_trajectory.hpp>
 #include <trajectory_msgs/msg/multi_dof_joint_trajectory_point.hpp>
 
@@ -32,6 +33,7 @@ private:
       desire_traj_vertices_sub_;
   rclcpp::Publisher<trajectory_msgs::msg::MultiDOFJointTrajectoryPoint>::
       SharedPtr desired_state_pub_;
+  
   std::unique_ptr<tf2_ros::TransformBroadcaster> br_;
 
   void trajCB(const geometry_msgs::msg::PoseArray::SharedPtr traj_msg) {
@@ -57,6 +59,28 @@ private:
     // ~~~~ begin solution
 
     geometry_msgs::msg::Transform transform;
+    geometry_msgs::msg::Twist zero_twist;
+    trajectory_msgs::msg::MultiDOFJointTrajectoryPoint msg; 
+
+    transform.translation.x = traj_msg->poses[0].position.x ;
+    transform.translation.y = traj_msg->poses[0].position.y ;
+    transform.translation.z = traj_msg->poses[0].position.z ;
+    transform.rotation = traj_msg->poses[0].orientation ;   // both are quaternion
+
+    msg.transforms.push_back(transform); 
+    msg.velocities.push_back(zero_twist); 
+    msg.accelerations.push_back(zero_twist);
+
+    desired_state_pub_->publish(msg);
+    
+    geometry_msgs::msg::TransformStamped origin;
+    geometry_msgs::msg::Transform tf_trans;
+    tf_trans.rotation.w = 1;  // identity quaternion 
+
+    origin.header.frame_id = "map" ;
+    origin.child_frame_id = "drone" ;
+    origin.transform = tf_trans; 
+    br_->sendTransform(origin);
 
     // ~~~~ end solution
     // ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~

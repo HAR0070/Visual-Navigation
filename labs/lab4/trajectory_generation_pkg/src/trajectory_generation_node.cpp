@@ -32,6 +32,14 @@ class WaypointFollower : public rclcpp::Node {
   mav_trajectory_generation::Trajectory trajectory;
   mav_trajectory_generation::Trajectory yaw_trajectory;
 
+  double unwrapYaw(double current_yaw, double previous_yaw) {
+    double diff = current_yaw - previous_yaw;
+    // convert angle to [-pi, pi]
+    diff = std::atan2(std::sin(diff), std::cos(diff));
+
+    return previous_yaw + diff;
+  }
+
   void onCurrentState(nav_msgs::msg::Odometry const &cur_state) {
     // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     //  PART 1.1 |  16.485 - Fall 2024  - Lab 4 coding assignment (5 pts)
@@ -48,6 +56,7 @@ class WaypointFollower : public rclcpp::Node {
     tf2::Quaternion q;
     tf2::fromMsg(cur_state.pose.pose.orientation , q);
     yawd = tf2::getYaw(q);
+
     have_state = true;
 
     // ~~~~ end solution
@@ -117,6 +126,7 @@ class WaypointFollower : public rclcpp::Node {
 
     mav_trajectory_generation::Vertex start(D), end(D);
     mav_trajectory_generation::Vertex y_start(1), y_end(1);
+    double prev_yaw = yawd;
 
     // begining
     // is current position
@@ -140,6 +150,9 @@ class WaypointFollower : public rclcpp::Node {
       tf2::Quaternion q_mid;
       tf2::fromMsg(poseArray.poses[i].orientation , q_mid);
       double yaw_mid = tf2::getYaw(q_mid);
+      yaw_mid = unwrapYaw(yaw_mid, prev_yaw);
+      prev_yaw = yaw_mid;
+      
       y_mid.addConstraint(ORIENTATION , yaw_mid);
       yaw_vertices.push_back(y_mid);
     }
@@ -155,6 +168,7 @@ class WaypointFollower : public rclcpp::Node {
     tf2::Quaternion q;
     tf2::fromMsg(poseArray.poses.back().orientation , q);
     double yaw_end = tf2::getYaw(q);
+    yaw_end = unwrapYaw(yaw_end, prev_yaw);
     y_end.makeStartOrEnd(yaw_end , ANGULAR_VELOCITY);
     yaw_vertices.push_back(y_end);
 
@@ -169,12 +183,12 @@ class WaypointFollower : public rclcpp::Node {
     // ============================================================
 
     std::vector<double> segment_time;
-    const double v_max = 8.0;
-    const double a_max = 2;
-    segment_time = estimateSegmentTimes(vertices, v_max, a_max);
+    const double v_max = 10.0;
+    const double a_max = 15;
+    segment_time = estimateSegmentTimes(vertices, v_max*1.5, a_max);
 
-    const double ang_v_max = 1.50;
-    const double ang_a_max = 2.0;
+    const double ang_v_max = 3;
+    const double ang_a_max = 3;
 
     // Shouldn't do this -- if there are 2 different segment times - then yaw and pos - will mismatch
     // std::vector<double> segment_time_yaw;
@@ -201,10 +215,10 @@ class WaypointFollower : public rclcpp::Node {
     mav_trajectory_generation::NonlinearOptimizationParameters parameters;
     parameters.max_iterations = 1000;
     parameters.f_rel = 0.05;
-    parameters.x_rel = 2;
+    parameters.x_rel = 1;
     parameters.time_penalty = 5000.0;
     parameters.initial_stepsize_rel = 0.1;
-    parameters.inequality_constraint_tolerance = 1;
+    parameters.inequality_constraint_tolerance = 0.2;
 
     // Position
     const int N = 10;
@@ -213,24 +227,33 @@ class WaypointFollower : public rclcpp::Node {
     opt.addMaximumMagnitudeConstraint(VELOCITY, v_max); 
     opt.addMaximumMagnitudeConstraint(ACCELERATION, a_max);
     opt.optimize();
+    opt.getTrajectory(&trajectory);   
 
     // Yaw - either you should stick to both segment times being same 
-    // in that case  last param - stick to time should be True in both case 
     // or get first segment times - then do yaw
+    std::vector<double> optimized_segment_times = trajectory.getSegmentTimes();
+
     const int Ny = 6;
     mav_trajectory_generation::NonlinearOptimizationParameters params;
     params.max_iterations = 1000;
     params.f_rel = 0.05;
-    params.x_rel = 10;
+    params.x_rel = 0.25;  // yaw is in radian -- this is allowing 5 degree error
     params.time_penalty = 500.0;
     params.initial_stepsize_rel = 0.1;
-    params.inequality_constraint_tolerance = 2;
+    params.inequality_constraint_tolerance = 0.5; // yaw is in radian -- this is allowing 5 degree error
 
     mav_trajectory_generation::PolynomialOptimizationNonLinear<Ny> yaw_opt(yd, params);
-    yaw_opt.setupFromVertices(yaw_vertices, segment_time, ANGULAR_VELOCITY);
+    yaw_opt.setupFromVertices(yaw_vertices, optimized_segment_times, ANGULAR_VELOCITY);
     yaw_opt.addMaximumMagnitudeConstraint(ANGULAR_VELOCITY, ang_v_max); 
-    yaw_opt.addMaximumMagnitudeConstraint(ANGULAR_ACCELERATION, ang_a_max);
+    // yaw_opt.addMaximumMagnitudeConstraint(ANGULAR_ACCELERATION, ang_a_max);
     yaw_opt.optimize();
+    yaw_opt.getTrajectory(&yaw_trajectory);
+
+    // Optimize Yaw (Linear) using the exact times the Position solver decided on!
+    // mav_trajectory_generation::PolynomialOptimization<Ny> yaw_opt(yd);
+    // yaw_opt.setupFromVertices(yaw_vertices, optimized_segment_times, ANGULAR_VELOCITY);
+    // yaw_opt.solveLinear(); // No need for nonlinear here, just follow the path smoothly
+    // yaw_opt.getTrajectory(&yaw_trajectory);
 
     // ============================
     // Get the optimized trajectory
@@ -238,8 +261,6 @@ class WaypointFollower : public rclcpp::Node {
     mav_trajectory_generation::Segment::Vector segments;
     // opt.getSegments(&segments); // Unnecessary?  -- can we get segment time through this? 
 
-    opt.getTrajectory(&trajectory);
-    yaw_opt.getTrajectory(&yaw_trajectory);
     trajectoryStartTime = now();
 
     RCLCPP_INFO(get_logger(),
@@ -269,6 +290,9 @@ class WaypointFollower : public rclcpp::Node {
 
     // Use elapsed time + 0.02 to sample the trajectory
     // since this sample is for nxt point
+
+    // If we sample the next point before we reach the current point -- then there will not be any stopping 
+    // Actually thats false -- you wil just lag -- this sample time is only for collecting reference points - 
     double sampling_time = elapsed_time + 0.02;
 
     // Set the time_from_start correctly
@@ -289,37 +313,53 @@ class WaypointFollower : public rclcpp::Node {
     int derivative_order_y = mav_trajectory_generation::derivative_order::ORIENTATION;
     Eigen::VectorXd sample_yaw = yaw_trajectory.evaluate(sampling_time, derivative_order_y);
 
+    int derivative_order_w = mav_trajectory_generation::derivative_order::ANGULAR_VELOCITY;
+    Eigen::VectorXd sample_w = yaw_trajectory.evaluate(sampling_time, derivative_order_w);
+
+    // controller - doesn't care about angular acceleration value 
+    // int derivative_order_dw = mav_trajectory_generation::derivative_order::ANGULAR_ACCELERATION;
+    // Eigen::VectorXd sample_dw = yaw_trajectory.evaluate(sampling_time, derivative_order_dw);
+
     tf2::Quaternion q;
     q.setRPY(0, 0, sample_yaw[0]);
     // Using only the first pose
     geometry_msgs::msg::Transform transform;
+    {
     transform.translation.x = sample_p[0];
     transform.translation.y = sample_p[1];
     transform.translation.z = sample_p[2];
-    transform.rotation = tf2::toMsg(q);
+    transform.rotation = tf2::toMsg(q); // to convert it to geometry_msgs type
+    } 
 
-    // Create zero velocity and acceleration
+    // Create velocity reference 
     geometry_msgs::msg::Twist velocity_twist;
-    velocity_twist.linear.x = sample_v[0];
+    {velocity_twist.linear.x = sample_v[0];
     velocity_twist.linear.y = sample_v[1];
     velocity_twist.linear.z = sample_v[2];
     velocity_twist.angular.x = 0;
     velocity_twist.angular.y = 0;
-    velocity_twist.angular.z = 0;
+    velocity_twist.angular.z = sample_w[0]; // this is for angular velocity reference in yaw
+    }
 
-    // Create zero velocity and acceleration
+    // Create acceleration reference
     geometry_msgs::msg::Twist accel_twist;
+    {
     accel_twist.linear.x = sample_a[0];
     accel_twist.linear.y = sample_a[1];
     accel_twist.linear.z = sample_a[2];
     accel_twist.angular.x = 0;
     accel_twist.angular.y = 0;
-    accel_twist.angular.z = 0;
+    accel_twist.angular.z = 0 ; //sample_dw[0];
+    }
+    
+    // zero twists - 
+    geometry_msgs::msg::Twist zero_twist;
 
-    // Add single transform and zero twists
     nex_point.transforms.push_back(transform);
+    // nex_point.velocities.push_back(velocity_twist);
+    // nex_point.accelerations.push_back(accel_twist);
     nex_point.velocities.push_back(velocity_twist);
-    nex_point.accelerations.push_back(accel_twist);
+    nex_point.accelerations.push_back(zero_twist);
 
     ///////---------------------////////////////
     RCLCPP_INFO(get_logger(), "Publishing desired state");
@@ -353,6 +393,7 @@ public:
                       std::bind(&WaypointFollower::publishDesiredState, this));
     desiredStateTimer->reset();
   }
+
 };
 
 int main(int argc, char **argv) {

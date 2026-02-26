@@ -13,6 +13,7 @@ public:
   TrajVerticesPublisher() : Node("traj_vertices_publisher") {
     // Declare parameters
     declare_parameter<std::string>("simulator_data_directory", "");
+    // this parameter is defined in the launch file -- is location to /Documents/VNAV/vnav_builds/lab4/lab4_Data
 
     // Create the publisher
     traj_vertices_pub_ = create_publisher<geometry_msgs::msg::PoseArray>(
@@ -27,7 +28,7 @@ public:
       return;
     }
 
-    // Load the pose array from the simulator
+    // Load the pose array from the simulator at once
     geometry_msgs::msg::PoseArray msg =
         load_pose_array_from_simulator(simulator_data_directory_);
 
@@ -81,6 +82,8 @@ private:
     std::vector<std::pair<int, geometry_msgs::msg::Pose>>
         traj_vertices_with_index;
     std::string door_name = "red_square_drone_door";
+    // Unity gives location of all the objects in the environment 
+    // Format is "object_name", "x", "y", "z", "qx", "qy", "qz", "qw" 
 
     while (in.read_row(object_name, x, y, z, qx, qy, qz, qw)) {
       std::istringstream iss(object_name);
@@ -114,6 +117,8 @@ private:
     // Sort the vertices
     std::sort(traj_vertices_with_index.begin(), traj_vertices_with_index.end(),
               [](const auto &a, const auto &b) { return a.first < b.first; });
+
+    // if needed to interpolate -- can do it here
 
     geometry_msgs::msg::PoseArray traj_msg;
     for (const auto &vertex_with_index : traj_vertices_with_index) {

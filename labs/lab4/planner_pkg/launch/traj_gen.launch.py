@@ -14,12 +14,9 @@ def generate_launch_description():
             name='traj_vertices_publisher',         # Name of the node (optional)
             output='screen',                        # Output to screen (optional)
             parameters=[{
-<<<<<<< HEAD
-                'simulator_data_directory': os.environ['HOME'] + '/vnav/tesse/lab4/lab4_Data'
-=======
                 'simulator_data_directory': os.environ['HOME'] + '/Documents/VNAV/vnav_builds/lab4/lab4_Data'
->>>>>>> 96e5e9c (reconnect to local folder)
+
             }]
         ),
-        
+
     ])
