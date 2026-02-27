@@ -68,6 +68,7 @@ class PoseEstimator : public rclcpp::Node {
   image_transport::Subscriber img_sub_;
   geometry_msgs::msg::PoseStamped curr_pose_;
   geometry_msgs::msg::PoseStamped prev_pose_;
+  geometry_msgs::msg::PoseStamped prev_est_pose_;
 
   // See definition of CameraParams in lab6_utils.h
   CameraParams camera_params_;
@@ -75,6 +76,8 @@ class PoseEstimator : public rclcpp::Node {
   cv::Mat T_camera_body;
   geometry_msgs::msg::Pose pose_camera_body;
   tf2::Transform transform_camera_body;
+
+  std::ofstream err_records;
 
   PoseEstimator() : Node("pose_estimator") {
     declare_parameter<bool>("use_ransac");
@@ -90,6 +93,15 @@ class PoseEstimator : public rclcpp::Node {
       exit(1);
     }
     get_parameter("show_images", show_images_);
+
+    // file to log errors for plotting
+    std::string file_name = "error_records" +  to_string(pose_estimator_) + ".csv" ;
+    err_records.open(file_name);
+    if (!err_records.is_open()) {
+        // std::cerr << "Error opening the file." << std::endl;
+        RCLCPP_WARN(get_logger(), "Error file is closed!");
+        return ;
+    }
 
     // populate camera intrinsics and distortion
     camera_params_.K = cv::Mat::zeros(3, 3, CV_64F);
@@ -119,7 +131,7 @@ class PoseEstimator : public rclcpp::Node {
     // Subscribe to drone pose estimation.
     pose_sub_ = create_subscription<nav_msgs::msg::Odometry>(
         "/ground_truth_pose",
-        10,
+        rclcpp::SensorDataQoS(),
         std::bind(&PoseEstimator::poseCallbackTesse, this, std::placeholders::_1));
 
     // Advertise drone pose.
@@ -134,11 +146,13 @@ class PoseEstimator : public rclcpp::Node {
     std::string transport = "raw";
     image_transport::TransportHints hints(this, transport);
 
-    sf_rgb_ = std::make_shared<image_transport::SubscriberFilter>(
-        this, "/rgb_images_topic", hints.getTransport());
+    // 1. Initialize the shared pointers empty
+    sf_rgb_ = std::make_shared<image_transport::SubscriberFilter>();
+    sf_depth_ = std::make_shared<image_transport::SubscriberFilter>();
 
-    sf_depth_ = std::make_shared<image_transport::SubscriberFilter>(
-        this, "/depth_images_topic", hints.getTransport());
+    // 2. Call the subscribe method and pass the Best Effort (Sensor Data) QoS
+    sf_rgb_->subscribe(this, "/rgb_images_topic", hints.getTransport(), rmw_qos_profile_sensor_data);
+    sf_depth_->subscribe(this, "/depth_images_topic", hints.getTransport(), rmw_qos_profile_sensor_data);
 
     sync_ = std::make_shared<message_filters::Synchronizer<MySyncPolicy>>(
         MySyncPolicy(10), *sf_rgb_, *sf_depth_);
@@ -174,7 +188,9 @@ class PoseEstimator : public rclcpp::Node {
     tf2::toMsg(current_pose * transform_camera_body, curr_pose_.pose);
 
     // publish the converted pose message so we can visualize in rViz
-    curr_pose_.header.frame_id = "world";
+    curr_pose_.header.frame_id = "world"; 
+    curr_pose_.header.stamp = msg->header.stamp;
+
     pub_pose_gt_->publish(curr_pose_);
   }
 
@@ -294,22 +310,14 @@ class PoseEstimator : public rclcpp::Node {
     // There might be a useful conversion function in lab6_utils.h... 
     // MSE for translation and rotation
     Eigen::Isometry3d gt_transform = tf2TransformToIsometry(gt_relative_pose); 
-    Eigen::Isometry3d est_transform = tf2TransformToIsometry(est_t_curr_frame);
+    Eigen::Isometry3d est_transform = tf2TransformToIsometry(est_relative_pose);
     
-    float translation_err = (gt_transform.translation() -est_transform.translation()).squaredNorm();
-    double rot_Frobenius_err = (gt_transform.linear() - est_transform.linear()).squaredNorm(); 
+    float translation_err = (gt_transform.translation() -est_transform.translation()).norm();
+    double rot_Frobenius_err = (gt_transform.linear() - est_transform.linear()).norm(); 
 
     // relative rotation method 
     //Eigen::Matrix3d R_err = gt_transform.linear().transpose() * est_transform.linear();
     //double rot_error_rad = std::acos(std::clamp((R_err.trace() - 1.0) / 2.0, -1.0, 1.0));
-
-    std::ofstream err_records("error_records.csv");
-
-    if (!err_records.is_open()) {
-        // std::cerr << "Error opening the file." << std::endl;
-        RCLCPP_WARN(get_logger(), "Error file is closed!");
-        return ;
-    }
 
     err_records << translation_err << "," << rot_Frobenius_err << std::endl;
 
@@ -441,6 +449,7 @@ class PoseEstimator : public rclcpp::Node {
 
             // ************************ end solution ************************
           }
+          LOG_EVERY_N(INFO, 10) << "We are running 5 point: " << adapter_mono.getNumberCorrespondences();
         } else {
           RCLCPP_WARN(get_logger(),
                       "Not enough correspondences to compute pose estimation using"
@@ -647,10 +656,11 @@ class PoseEstimator : public rclcpp::Node {
     tf2::Transform est_t_prev_frame, est_t_curr_frame;
     tf2::convert(pose_estimation.pose, est_t_curr_frame);
     tf2::convert(curr_pose_.pose, gt_t_curr_frame);
-    tf2::convert(prev_pose_.pose, est_t_prev_frame);
+    tf2::convert(prev_est_pose_.pose, est_t_prev_frame);
     tf2::convert(prev_pose_.pose, gt_t_prev_frame);
 
     // Evaluate pose errors
+
     evaluateRPE(gt_t_prev_frame, gt_t_curr_frame, est_t_prev_frame, est_t_curr_frame);
 
     // (TODO) Now, publish your estimated pose here. Since your pose estimate is
@@ -661,6 +671,8 @@ class PoseEstimator : public rclcpp::Node {
     // pose
 
     // *********************** begin solution ***********************
+    pose_estimation.header.frame_id = "world";
+    pose_estimation.header.stamp = rgb_msg->header.stamp;
     pub_pose_estimation_->publish(pose_estimation); 
     // *********************** end solution ***********************
 
@@ -668,6 +680,7 @@ class PoseEstimator : public rclcpp::Node {
     prev_bgr = bgr.clone();
     prev_depth = depth.clone();
     prev_pose_ = curr_pose_;
+    prev_est_pose_.pose =  pose_estimation.pose;
   }
 };
 
@@ -690,7 +703,8 @@ int main(int argc, char** argv) {
   executor.add_node(node);
   rclcpp::Rate r(100);
   while (rclcpp::ok()) {
-    executor.spin_once(); 
+    // Process whatever is in the queue for up to 10ms, then move on
+    executor.spin_once(std::chrono::milliseconds(10)); 
     cv::waitKey(1);
     r.sleep();
   }

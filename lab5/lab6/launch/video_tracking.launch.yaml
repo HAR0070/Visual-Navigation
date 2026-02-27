@@ -5,7 +5,7 @@ launch:
         default: "0"
     - arg:
         name: "dataset"
-        default: "30fps_424x240_2018-10-01-18-35-06"     #"vnav-lab6-office"
+        default: "vnav-lab6-office" #"30fps_424x240_2018-10-01-18-35-06"
 
     - arg:
         name: "path_to_dataset"
