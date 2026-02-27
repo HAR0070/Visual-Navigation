@@ -183,8 +183,8 @@ class WaypointFollower : public rclcpp::Node {
     // ============================================================
 
     std::vector<double> segment_time;
-    const double v_max = 10.0;
-    const double a_max = 15;
+    const double v_max = 8.0;
+    const double a_max = 10;
     segment_time = estimateSegmentTimes(vertices, v_max*1.5, a_max);
 
     const double ang_v_max = 3;
