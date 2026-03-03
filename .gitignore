@@ -1,7 +1,8 @@
 build/ 
 install/ 
 log/ 
-venv/ 
+venv/
+**/env_yolo/ 
 
 **/build/
 **/install/ 
