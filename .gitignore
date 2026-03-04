@@ -3,6 +3,15 @@ install/
 log/ 
 venv/
 **/env_yolo/ 
+**/ultralytics/
+**/runs/
+*.jpg
+yolo26n.pt
+data/
+video/
+*.mkv
+*.avi
+*.mp4
 
 **/build/
 **/install/ 
